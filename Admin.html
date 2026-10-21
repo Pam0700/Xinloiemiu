@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quản Trị Câu Chuyện — Anh Xin Lỗi Em ❤️</title>
+  <style>
+    :root {
+      --bg-dark: #12091a;
+      --card-bg: #1e102a;
+      --border: rgba(246, 187, 208, 0.25);
+      --pink: #f6bbd0;
+      --wine: #8b2640;
+      --text: #fff9f5;
+      --muted: #cbb8c3;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text);
+      line-height: 1.55;
+      padding: 24px 16px 60px;
+    }
+    .admin-container {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .admin-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+    }
+    h1 { font-size: 1.55rem; color: var(--pink); margin-bottom: 6px; }
+    h2 { font-size: 1.15rem; color: var(--pink); margin-bottom: 14px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 5px; font-weight: 500; }
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #110718;
+      color: var(--text);
+      font-size: 0.92rem;
+    }
+    textarea { min-height: 110px; resize: vertical; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 18px;
+      border-radius: 99px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: linear-gradient(135deg, var(--wine), #b83b5e);
+      color: #fff;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .btn-secondary {
+      background: rgba(255,255,255,0.08);
+    }
+    .status-banner {
+      padding: 12px 16px;
+      border-radius: 12px;
+      background: rgba(246, 187, 208, 0.12);
+      border: 1px solid var(--pink);
+      font-size: 0.9rem;
+    }
+    .photo-row {
+      display: grid;
+      grid-template-columns: 1fr 1.5fr auto;
+      gap: 10px;
+      margin-bottom: 10px;
+      align-items: center;
+    }
+    @media (max-width: 600px) {
+      .photo-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="admin-container">
+    <div class="admin-card">
+      <h1>⚙️ Quản Trị Nội Dung — "Anh Xin Lỗi Em ❤️"</h1>
+      <p style="color:var(--muted); font-size:0.9rem;">
+        Tùy chỉnh tên người nhận, ID thư mục ảnh Google Drive, nhạc nền, lời thú nhận và bức thư xin lỗi mà không cần sửa code.
+      </p>
+      <div class="status-banner" style="margin-top:12px;" id="auth-banner">
+        Trạng thái xác thực: <strong><?= authMessage ?></strong>
+      </div>
+    </div>
+
+    <!-- Khu vực 1: Thông tin người nhận & Google Drive -->
+    <div class="admin-card">
+      <h2>1. Thông tin chung & Kết nối Google Drive</h2>
+      <div class="grid-2">
+        <div>
+          <label>Tên hoặc biệt danh người yêu (Người nhận)</label>
+          <input type="text" id="cfg-recipientName" placeholder="VD: Em bé của anh / Minh Anh">
+        </div>
+        <div>
+          <label>Tên của bạn (Người gửi)</label>
+          <input type="text" id="cfg-senderName" placeholder="VD: Anh Tuấn">
+        </div>
+        <div>
+          <label>Google Drive Folder ID chứa ảnh (Thư mục Images)</label>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="cfg-driveFolderId" placeholder="Dán Folder ID hoặc URL thư mục Drive">
+            <button type="button" class="btn btn-secondary" id="btn-check-folder">Kiểm tra</button>
+          </div>
+        </div>
+        <div>
+          <label>Google Drive File ID của nhạc nền (.mp3)</label>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="cfg-musicFileId" placeholder="Dán File ID hoặc URL file MP3">
+            <button type="button" class="btn btn-secondary" id="btn-check-music">Kiểm tra</button>
+          </div>
+        </div>
+        <div>
+          <label>Google Sheet ID (Tùy chọn — để đồng bộ cấu hình & lời nhắn)</label>
+          <input type="text" id="cfg-googleSheetId" placeholder="Để trống nếu chỉ dùng PropertiesService">
+        </div>
+        <div>
+          <label>File ID ảnh nền Cảnh kết thúc (Để trống sẽ lấy ảnh cuối)</label>
+          <input type="text" id="cfg-finalBgFileId" placeholder="Dán File ID ảnh kỷ niệm nổi bật">
+        </div>
+      </div>
+      <p id="drive-check-result" style="margin-top:10px; font-size:0.86rem; color:var(--pink);"></p>
+    </div>
+
+    <!-- Khu vực 2: Danh sách ảnh & chú thích (Cảnh 2) -->
+    <div class="admin-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h2 style="margin:0; border:none;">2. Danh sách ảnh kỷ niệm & Chú thích (Cảnh 2)</h2>
+        <button type="button" class="btn btn-secondary" id="btn-add-photo-row">+ Thêm ảnh</button>
+      </div>
+      <p style="font-size:0.84rem; color:var(--muted); margin-bottom:12px;">
+        Mẹo: Nếu bạn đã điền Folder ID ở mục 1 và đặt tên ảnh theo thứ tự <code>01.jpg, 02.jpg...</code>, hệ thống sẽ tự động ghép ảnh theo thứ tự hoặc theo File ID bên dưới.
+      </p>
+      <div id="photo-rows-container"></div>
+    </div>
+
+    <!-- Khu vực 3: Nội dung các cảnh & Lá thư xin lỗi -->
+    <div class="admin-card">
+      <h2>3. Kịch bản lời nhắn (Cảnh 1, Cảnh 3, Cảnh 4, Cảnh 5)</h2>
+      <div class="grid-2" style="margin-bottom:14px;">
+        <div>
+          <label>Câu mở đầu (Cảnh 1)</label>
+          <input type="text" id="cfg-openingText" placeholder="Em à, anh có điều muốn nói…">
+        </div>
+        <div>
+          <label>Chữ trên nút bấm mở màn (Cảnh 1)</label>
+          <input type="text" id="cfg-openingButtonText" placeholder="Chạm vào đây nhé ❤️">
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label>Những điều anh muốn nói (Cảnh 3 — mỗi dòng 1 câu)</label>
+        <textarea id="cfg-confessionLines" placeholder="Mỗi dòng là một câu xuất hiện tuần tự..."></textarea>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:14px;">
+        <div>
+          <label>Lời chào đầu thư (Cảnh 4)</label>
+          <input type="text" id="cfg-letterTitle" placeholder="Gửi em, người mà anh luôn trân trọng.">
+        </div>
+        <div>
+          <label>Chữ ký cuối thư (Cảnh 4)</label>
+          <input type="text" id="cfg-letterSignOff" placeholder="Anh xin lỗi em. ❤️">
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label>Toàn bộ nội dung bức thư xin lỗi (Cảnh 4)</label>
+        <textarea id="cfg-letterBody" style="min-height:160px;"></textarea>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <label>Lời nhắn cuối — Dòng 1 (Cảnh 5)</label>
+          <input type="text" id="cfg-finalLine1">
+        </div>
+        <div>
+          <label>Lời nhắn cuối — Dòng 2 (Cảnh 5)</label>
+          <input type="text" id="cfg-finalLine2">
+        </div>
+      </div>
+    </div>
+
+    <!-- Khu vực 4: Màu sắc, Thời lượng & Lưu cấu hình -->
+    <div class="admin-card">
+      <h2>4. Giao diện, Thời lượng chuyển cảnh & Lưu thay đổi</h2>
+      <div class="grid-2" style="margin-bottom:16px;">
+        <div>
+          <label>Thời lượng mỗi bức ảnh (ms)</label>
+          <input type="number" id="cfg-photoDurationMs" value="5500" min="3500" max="15000" step="500">
+        </div>
+        <div>
+          <label>Chế độ hiển thị ảnh trên khung 9:16</label>
+          <select id="cfg-imageFitMode">
+            <option value="cover">Lấp đầy khung (Cover — Điện ảnh)</option>
+            <option value="contain">Giữ nguyên toàn bộ ảnh (Contain — Không cắt góc)</option>
+          </select>
+        </div>
+        <div>
+          <label>Màu Hồng Pastel chủ đạo (Hex)</label>
+          <input type="text" id="cfg-primaryPink" value="#f6bbd0">
+        </div>
+        <div>
+          <label>Màu Đỏ Rượu Vang nhấn (Hex)</label>
+          <input type="text" id="cfg-wineRed" value="#6b1d2f">
+        </div>
+      </div>
+
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+        <button type="button" class="btn" id="btn-save-config">💾 Lưu toàn bộ cấu hình</button>
+        <span id="save-status-text" style="font-size:0.9rem; color:var(--pink);"></span>
+      </div>
+    </div>
+
+    <!-- Khu vực 5: Hộp thư phản hồi từ người yêu -->
+    <div class="admin-card">
+      <h2>5. Lời nhắn phản hồi từ người yêu (Cảnh 5)</h2>
+      <div id="lover-replies-list" style="font-size:0.9rem; color:var(--muted);">
+        Đang tải danh sách phản hồi...
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      var photoItems = [];
+
+      function renderPhotoRows() {
+        var box = document.getElementById('photo-rows-container');
+        box.innerHTML = '';
+        photoItems.forEach(function(item, idx) {
+          var row = document.createElement('div');
+          row.className = 'photo-row';
+          row.innerHTML =
+            '<input type="text" class="p-id" placeholder="File ID hoặc tên file (01.jpg)" value="' + (item.fileId || item.fileName || '') + '">' +
+            '<input type="text" class="p-cap" placeholder="Chú thích ngắn dưới ảnh..." value="' + (item.caption || '') + '">' +
+            '<button type="button" class="btn btn-secondary btn-del" data-idx="' + idx + '">Xóa</button>';
+          box.appendChild(row);
+        });
+
+        box.querySelectorAll('.btn-del').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            var i = Number(btn.getAttribute('data-idx'));
+            photoItems.splice(i, 1);
+            renderPhotoRows();
+          });
+        });
+      }
+
+      function populateForm(cfg) {
+        document.getElementById('cfg-recipientName').value = cfg.recipientName || '';
+        document.getElementById('cfg-senderName').value = cfg.senderName || '';
+        document.getElementById('cfg-driveFolderId').value = cfg.driveFolderId || '';
+        document.getElementById('cfg-musicFileId').value = (cfg.music && cfg.music.fileId) || '';
+        document.getElementById('cfg-googleSheetId').value = cfg.googleSheetId || '';
+        document.getElementById('cfg-finalBgFileId').value = cfg.finalBackgroundFileId || '';
+        document.getElementById('cfg-openingText').value = cfg.openingText || '';
+        document.getElementById('cfg-openingButtonText').value = cfg.openingButtonText || '';
+        document.getElementById('cfg-confessionLines').value = (cfg.confessionLines || []).join('\n');
+        document.getElementById('cfg-letterTitle').value = cfg.letterTitle || '';
+        document.getElementById('cfg-letterSignOff').value = cfg.letterSignOff || '';
+        document.getElementById('cfg-letterBody').value = cfg.letterBody || '';
+        document.getElementById('cfg-finalLine1').value = cfg.finalMessageLine1 || '';
+        document.getElementById('cfg-finalLine2').value = cfg.finalMessageLine2 || '';
+        document.getElementById('cfg-photoDurationMs').value = (cfg.timing && cfg.timing.photoDurationMs) || 5500;
+        document.getElementById('cfg-imageFitMode').value = (cfg.timing && cfg.timing.imageFitMode) || 'cover';
+        document.getElementById('cfg-primaryPink').value = (cfg.theme && cfg.theme.primaryPink) || '#f6bbd0';
+        document.getElementById('cfg-wineRed').value = (cfg.theme && cfg.theme.wineRed) || '#6b1d2f';
+
+        photoItems = Array.isArray(cfg.images) ? cfg.images.slice() : [];
+        renderPhotoRows();
+      }
+
+      function collectFormPayload() {
+        var rows = document.querySelectorAll('#photo-rows-container .photo-row');
+        var collectedImages = [];
+        rows.forEach(function(r, idx) {
+          var idVal = r.querySelector('.p-id').value.trim();
+          var capVal = r.querySelector('.p-cap').value.trim();
+          collectedImages.push({
+            order: idx + 1,
+            fileId: idVal,
+            fileName: idVal || ('0' + (idx + 1) + '.jpg'),
+            dateLabel: 'Kỷ niệm #' + (idx + 1),
+            caption: capVal
+          });
+        });
+
+        return {
+          recipientName: document.getElementById('cfg-recipientName').value.trim(),
+          senderName: document.getElementById('cfg-senderName').value.trim(),
+          driveFolderId: document.getElementById('cfg-driveFolderId').value.trim(),
+          googleSheetId: document.getElementById('cfg-googleSheetId').value.trim(),
+          finalBackgroundFileId: document.getElementById('cfg-finalBgFileId').value.trim(),
+          openingText: document.getElementById('cfg-openingText').value.trim(),
+          openingButtonText: document.getElementById('cfg-openingButtonText').value.trim(),
+          confessionLines: document.getElementById('cfg-confessionLines').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean),
+          letterTitle: document.getElementById('cfg-letterTitle').value.trim(),
+          letterSignOff: document.getElementById('cfg-letterSignOff').value.trim(),
+          letterBody: document.getElementById('cfg-letterBody').value.trim(),
+          finalMessageLine1: document.getElementById('cfg-finalLine1').value.trim(),
+          finalMessageLine2: document.getElementById('cfg-finalLine2').value.trim(),
+          timing: {
+            photoDurationMs: Number(document.getElementById('cfg-photoDurationMs').value) || 5500,
+            imageFitMode: document.getElementById('cfg-imageFitMode').value,
+            autoAdvancePhotos: true
+          },
+          theme: {
+            primaryPink: document.getElementById('cfg-primaryPink').value.trim(),
+            wineRed: document.getElementById('cfg-wineRed').value.trim(),
+            creamWhite: '#fff9f5',
+            sunsetPurple: '#1c0d26'
+          },
+          music: {
+            enabled: true,
+            fileId: document.getElementById('cfg-musicFileId').value.trim(),
+            defaultVolume: 0.65
+          },
+          images: collectedImages
+        };
+      }
+
+      document.getElementById('btn-add-photo-row').addEventListener('click', function() {
+        photoItems.push({ fileId: '', caption: 'Khoảnh khắc đáng nhớ của hai đứa.' });
+        renderPhotoRows();
+      });
+
+      document.getElementById('btn-check-folder').addEventListener('click', function() {
+        var val = document.getElementById('cfg-driveFolderId').value.trim();
+        var out = document.getElementById('drive-check-result');
+        out.textContent = 'Đang kiểm tra thư mục trên Google Drive...';
+        if (window.google && window.google.script) {
+          window.google.script.run
+            .withSuccessHandler(function(res) {
+              out.textContent = res.ok
+                ? ('✅ Thư mục "' + res.name + '" hợp lệ — Tìm thấy ' + res.imageCount + ' ảnh. ' + res.recommendation)
+                : ('❌ ' + res.error);
+            })
+            .withFailureHandler(function(err) { out.textContent = '❌ Lỗi: ' + err.message; })
+            .validateDriveFile(val, 'folder');
+        }
+      });
+
+      document.getElementById('btn-check-music').addEventListener('click', function() {
+        var val = document.getElementById('cfg-musicFileId').value.trim();
+        var out = document.getElementById('drive-check-result');
+        out.textContent = 'Đang kiểm tra file nhạc trên Google Drive...';
+        if (window.google && window.google.script) {
+          window.google.script.run
+            .withSuccessHandler(function(res) {
+              out.textContent = res.ok
+                ? ('✅ File "' + res.name + '" (' + res.sizeMb + 'MB) — ' + res.recommendation)
+                : ('❌ ' + res.error);
+            })
+            .withFailureHandler(function(err) { out.textContent = '❌ Lỗi: ' + err.message; })
+            .validateDriveFile(val, 'file');
+        }
+      });
+
+      document.getElementById('btn-save-config').addEventListener('click', function() {
+        var statusEl = document.getElementById('save-status-text');
+        statusEl.textContent = 'Đang lưu cấu hình...';
+        var payload = collectFormPayload();
+        if (window.google && window.google.script) {
+          window.google.script.run
+            .withSuccessHandler(function(res) {
+              statusEl.textContent = '✅ ' + res.message;
+            })
+            .withFailureHandler(function(err) {
+              statusEl.textContent = '❌ Không thể lưu: ' + err.message;
+            })
+            .saveStoryConfig(payload);
+        }
+      });
+
+      if (window.google && window.google.script) {
+        window.google.script.run
+          .withSuccessHandler(function(res) {
+            if (res && res.config) populateForm(res.config);
+            var repBox = document.getElementById('lover-replies-list');
+            if (res && Array.isArray(res.replies) && res.replies.length > 0) {
+              repBox.innerHTML = res.replies.map(function(r) {
+                return '<div style="padding:10px; border-bottom:1px solid var(--border);">' +
+                  '<strong>' + r.timestamp + '</strong> — <em>' + r.mood + '</em><br>' +
+                  '<span>' + r.message + '</span></div>';
+              }).join('');
+            } else {
+              repBox.textContent = 'Chưa có lời nhắn phản hồi nào.';
+            }
+          })
+          .withFailureHandler(function(err) {
+            document.getElementById('lover-replies-list').textContent = 'Chưa xác thực quyền Admin: ' + err.message;
+          })
+          .getAdminConfig();
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+  <title>Anh xin lỗi em ❤️</title>
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="cinematic-viewport" id="app-viewport">
+    <!-- Hiệu ứng hạt sáng & trái tim bay -->
+    <canvas id="ambient-canvas"></canvas>
+    <div class="film-grain-overlay"></div>
+
+    <!-- Khung câu chuyện 9:16 -->
+    <main class="story-stage" id="story-stage">
+      <!-- Thanh tiến trình 5 cảnh & Điều khiển nhạc nền -->
+      <header class="top-hud">
+        <div class="story-progress-bars" id="scene-progress-bars" aria-label="Tiến trình câu chuyện">
+          <div class="progress-segment" data-scene="1"><div class="progress-fill" id="prog-1"></div></div>
+          <div class="progress-segment" data-scene="2"><div class="progress-fill" id="prog-2"></div></div>
+          <div class="progress-segment" data-scene="3"><div class="progress-fill" id="prog-3"></div></div>
+          <div class="progress-segment" data-scene="4"><div class="progress-fill" id="prog-4"></div></div>
+          <div class="progress-segment" data-scene="5"><div class="progress-fill" id="prog-5"></div></div>
+        </div>
+
+        <div class="hud-controls-row">
+          <span class="scene-indicator-pill" id="scene-label-pill">Cảnh 1 / 5 • Mở đầu</span>
+
+          <div class="audio-controller">
+            <button type="button" class="vinyl-btn" id="btn-toggle-music" title="Bật / Tắt nhạc nền" aria-label="Bật hoặc tắt nhạc nền">♪</button>
+            <div class="equalizer-bars" aria-hidden="true">
+              <span class="eq-bar"></span>
+              <span class="eq-bar"></span>
+              <span class="eq-bar"></span>
+            </div>
+            <input type="range" id="music-volume-slider" class="volume-slider" min="0" max="1" step="0.05" value="0.65" aria-label="Âm lượng nhạc nền">
+          </div>
+        </div>
+      </header>
+
+      <!-- ==================== CẢNH 1: MỞ ĐẦU ==================== -->
+      <section class="scene-layer active" id="scene-1" aria-label="Cảnh 1: Mở đầu">
+        <div class="opening-card">
+          <div class="heart-halo" aria-hidden="true">❤️</div>
+          <p class="recipient-badge" id="ui-recipient-badge">Dành riêng cho em</p>
+          <h1 class="serif-title" id="ui-opening-text">Em à, anh có điều muốn nói…</h1>
+          <p id="ui-opening-subtitle" style="font-size:0.92rem; color:rgba(255,249,245,0.75); margin-bottom:26px; line-height:1.5;">
+            Hãy bật âm thanh và dành cho anh vài phút nhỏ nhé.
+          </p>
+          <button type="button" class="romantic-btn" id="btn-start-story">
+            <span id="ui-opening-btn-text">Chạm vào đây nhé ❤️</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ==================== CẢNH 2: NHỮNG KỶ NIỆM ==================== -->
+      <section class="scene-layer" id="scene-2" aria-label="Cảnh 2: Những kỷ niệm">
+        <div class="memory-stage-wrapper">
+          <div class="polaroid-frame" id="polaroid-card">
+            <div class="photo-viewport">
+              <img id="active-memory-img" class="memory-photo" src="" alt="Ảnh kỷ niệm của hai đứa">
+              <div class="photo-tap-zones">
+                <div class="tap-zone-prev" id="tap-prev-photo" title="Ảnh trước"></div>
+                <div class="tap-zone-next" id="tap-next-photo" title="Ảnh tiếp theo"></div>
+              </div>
+            </div>
+            <div class="polaroid-caption-box">
+              <div class="memory-date-tag" id="active-memory-date">Kỷ niệm #1</div>
+              <p class="memory-caption-text" id="active-memory-caption">Khoảnh khắc bình yên bên em.</p>
+            </div>
+          </div>
+
+          <div class="memory-footer-nav">
+            <button type="button" class="secondary-btn" id="btn-prev-photo">← Ảnh trước</button>
+            <span id="photo-counter-badge" style="font-size:0.82rem; color:rgba(255,249,245,0.8);">1 / 4</span>
+            <button type="button" class="romantic-btn" id="btn-next-photo" style="padding:10px 20px; font-size:0.88rem;">Tiếp theo →</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== CẢNH 3: NHỮNG ĐIỀU ANH MUỐN NÓI ==================== -->
+      <section class="scene-layer" id="scene-3" aria-label="Cảnh 3: Những điều anh muốn nói">
+        <div class="confession-container">
+          <p style="font-size:0.78rem; text-transform:uppercase; letter-spacing:0.12em; color:var(--primary-pink);">
+            Từ tận đáy lòng anh
+          </p>
+          <div id="confession-lines-box" style="display:flex; flex-direction:column; gap:16px;"></div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+            <button type="button" class="secondary-btn" id="btn-back-to-memories">← Kỷ niệm</button>
+            <button type="button" class="romantic-btn" id="btn-to-letter" style="padding:11px 22px; font-size:0.9rem;">
+              Mở lá thư của anh 💌
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== CẢNH 4: BỨC THƯ XIN LỖI ==================== -->
+      <section class="scene-layer" id="scene-4" aria-label="Cảnh 4: Bức thư xin lỗi">
+        <div class="letter-wrapper">
+          <!-- Phong bì trước khi mở -->
+          <div class="envelope-seal-stage" id="envelope-closed-box">
+            <p style="font-size:0.8rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--wine-red); font-weight:600;">
+              Lá thư viết tay gửi em
+            </p>
+            <div class="wax-seal-badge">💌</div>
+            <h2 style="font-family:'Cormorant Garamond',serif; font-size:1.65rem; margin-bottom:8px;" id="envelope-recipient-title">
+              Gửi người anh thương
+            </h2>
+            <p style="font-size:0.88rem; color:#5b3742; margin-bottom:18px;">
+              Chạm vào dấu niêm phong để mở lá thư
+            </p>
+            <button type="button" class="romantic-btn" id="btn-open-envelope">Mở phong bì ❤️</button>
+          </div>
+
+          <!-- Nội dung thư sau khi mở -->
+          <article class="handwritten-letter-paper" id="letter-opened-box" style="display:none;">
+            <h2 class="letter-salutation" id="ui-letter-title">Gửi em, người mà anh luôn trân trọng.</h2>
+            <div class="letter-body-paragraphs" id="ui-letter-body"></div>
+            <p class="letter-signature" id="ui-letter-signoff">Anh xin lỗi em. ❤️</p>
+            <div style="margin-top:20px; display:flex; justify-content:flex-end;">
+              <button type="button" class="romantic-btn" id="btn-to-final-scene" style="padding:11px 22px; font-size:0.9rem;">
+                Lời nhắn cuối →
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ==================== CẢNH 5: LỜI NHẮN CUỐI ==================== -->
+      <section class="scene-layer" id="scene-5" aria-label="Cảnh 5: Lời nhắn cuối">
+        <div class="final-bg-backdrop" id="final-scene-bg"></div>
+        <div class="final-scene-card">
+          <div class="heart-halo" style="width:54px; height:54px; font-size:1.4rem; margin-bottom:16px;">🤍</div>
+          <p class="serif-title" id="ui-final-line-1" style="font-size:1.55rem; margin-bottom:12px;">
+            Anh không mong em phải tha thứ ngay lúc này.
+          </p>
+          <p id="ui-final-line-2" style="font-size:1.05rem; color:rgba(255,249,245,0.88); line-height:1.55;">
+            Anh chỉ mong em biết rằng lời xin lỗi này là thật lòng.
+          </p>
+
+          <div class="final-actions-stack">
+            <button type="button" class="romantic-btn" id="btn-open-reply-modal">
+              Anh vẫn muốn lắng nghe em 💬
+            </button>
+            <div style="display:flex; gap:10px; justify-content:center;">
+              <button type="button" class="secondary-btn" id="btn-reread-letter" style="flex:1;">
+                Đọc lại lá thư 💌
+              </button>
+              <button type="button" class="secondary-btn" id="btn-rewatch-memories" style="flex:1;">
+                Xem lại kỷ niệm 📸
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal gửi tâm sự của người yêu (Không gây áp lực) -->
+    <div class="modal-backdrop" id="reply-modal">
+      <div class="reply-modal-box">
+        <h3 style="font-family:'Cormorant Garamond',serif; font-size:1.55rem; margin-bottom:6px;">
+          Anh luôn ở đây lắng nghe em
+        </h3>
+        <p style="font-size:0.85rem; color:rgba(255,249,245,0.75); line-height:1.45;">
+          Em không cần phải trả lời ngay đâu. Nhưng nếu có điều gì khiến em chưa vui, em có thể viết lại đây cho anh biết nhé:
+        </p>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;" id="mood-chips">
+          <button type="button" class="secondary-btn mood-chip" data-mood="Em đã đọc rồi, cho em thêm thời gian nhé 🤍" style="font-size:0.78rem; padding:6px 12px;">
+            Cho em thêm thời gian 🤍
+          </button>
+          <button type="button" class="secondary-btn mood-chip" data-mood="Em vẫn còn hơi buồn một chút..." style="font-size:0.78rem; padding:6px 12px;">
+            Em vẫn còn hơi buồn...
+          </button>
+          <button type="button" class="secondary-btn mood-chip" data-mood="Cảm ơn anh vì đã lắng nghe em ❤️" style="font-size:0.78rem; padding:6px 12px;">
+            Cảm ơn anh đã lắng nghe ❤️
+          </button>
+        </div>
+        <textarea id="reply-message-input" class="reply-textarea" placeholder="Điều em muốn nói với anh..."></textarea>
+        <p id="reply-status-msg" style="font-size:0.82rem; color:var(--primary-pink); min-height:18px; margin-bottom:8px;"></p>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button type="button" class="secondary-btn" id="btn-close-reply-modal">Đóng</button>
+          <button type="button" class="romantic-btn" id="btn-send-reply" style="padding:10px 20px; font-size:0.88rem;">
+            Gửi cho anh 💌
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Thẻ audio ẩn phục vụ nhạc nền MP3 từ Google Drive -->
+    <audio id="bg-audio-player" preload="auto" loop crossorigin="anonymous"></audio>
+  </div>
+
+  <?!= include('Scripts'); ?>
+</body>
+</html>

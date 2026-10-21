@@ -1,0 +1,746 @@
+<script>
+  /**
+   * ============================================================================
+   * FILE: Scripts.html
+   * Hệ thống điều phối chuyển cảnh (TransitionManager), tải trước ảnh (Preloader),
+   * quản lý nhạc nền (Audio + Web Audio Synth Fallback) và hiệu ứng hạt sáng.
+   * ============================================================================
+   */
+  (function() {
+    'use strict';
+
+    var SCENE_TITLES = {
+      1: 'Cảnh 1 / 5 • Mở đầu',
+      2: 'Cảnh 2 / 5 • Những kỷ niệm',
+      3: 'Cảnh 3 / 5 • Điều anh muốn nói',
+      4: 'Cảnh 4 / 5 • Lá thư viết tay',
+      5: 'Cảnh 5 / 5 • Lời nhắn cuối'
+    };
+
+    var AppState = {
+      config: null,
+      currentScene: 1,
+      currentPhotoIndex: 0,
+      photoTimerId: null,
+      confessionTimers: [],
+      isMusicPlaying: false,
+      musicMode: 'synth', // 'mp3' hoặc 'synth'
+      volume: 0.65,
+      selectedMood: 'Em đã đọc rồi, cho em thêm thời gian nhé 🤍',
+      imageCache: {},
+      rafId: null,
+      particles: [],
+      prefersReducedMotion: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    };
+
+    /* --------------------------------------------------------------------------
+     * 1. BỘ TỔNG HỢP GIAI ĐIỆU PIANO LÃNG MẠN (WEB AUDIO API FALLBACK)
+     * Đảm bảo website luôn có nhạc nền dịu dàng ngay cả khi chưa cấu hình MP3
+     * hoặc khi Google Drive giới hạn băng thông stream trực tiếp.
+     * -------------------------------------------------------------------------- */
+    var SynthPiano = {
+      ctx: null,
+      timerId: null,
+      noteIndex: 0,
+      melodyNotes: [
+        261.63, 329.63, 392.00, 523.25, 493.88, 392.00, 329.63, 293.66,
+        220.00, 261.63, 329.63, 440.00, 392.00, 329.63, 293.66, 261.63,
+        174.61, 220.00, 261.63, 349.23, 329.63, 261.63, 220.00, 196.00,
+        196.00, 246.94, 293.66, 392.00, 349.23, 293.66, 246.94, 261.63
+      ],
+      ensureContext: function() {
+        if (!this.ctx) {
+          var AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+            this.ctx = new AudioContextClass();
+          }
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      },
+      playSingleNote: function(freq, vol) {
+        if (!this.ctx || !AppState.isMusicPlaying) return;
+        try {
+          var now = this.ctx.currentTime;
+          var osc = this.ctx.createOscillator();
+          var gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now);
+
+          var safeVol = Math.max(0.01, Math.min(0.35, vol * 0.22));
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.exponentialRampToValueAtTime(safeVol, now + 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 1.45);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 1.5);
+        } catch (e) {
+          // Bỏ qua lỗi audio context
+        }
+      },
+      startLoop: function() {
+        this.stopLoop();
+        this.ensureContext();
+        var self = this;
+        this.timerId = window.setInterval(function() {
+          if (!AppState.isMusicPlaying || document.hidden) return;
+          var freq = self.melodyNotes[self.noteIndex % self.melodyNotes.length];
+          self.noteIndex++;
+          self.playSingleNote(freq, AppState.volume);
+        }, 720);
+      },
+      stopLoop: function() {
+        if (this.timerId) {
+          window.clearInterval(this.timerId);
+          this.timerId = null;
+        }
+      }
+    };
+
+    /* --------------------------------------------------------------------------
+     * 2. QUẢN LÝ NHẠC NỀN (GOOGLE DRIVE MP3 + PROXY BASE64 + SYNTH FALLBACK)
+     * -------------------------------------------------------------------------- */
+    function initAudioSystem(musicCfg) {
+      var audioEl = document.getElementById('bg-audio-player');
+      var volSlider = document.getElementById('music-volume-slider');
+      AppState.volume = (musicCfg && typeof musicCfg.defaultVolume === 'number') ? musicCfg.defaultVolume : 0.65;
+      if (volSlider) {
+        volSlider.value = String(AppState.volume);
+      }
+      if (audioEl) {
+        audioEl.volume = AppState.volume;
+      }
+
+      if (musicCfg && musicCfg.directUrl) {
+        AppState.musicMode = 'mp3';
+        audioEl.src = musicCfg.directUrl;
+        audioEl.onerror = function() {
+          // Nếu link trực tiếp từ Drive bị chặn bởi CORS/Cookie, thử tải qua Base64 Proxy của Apps Script
+          if (musicCfg.fileId && window.google && window.google.script && window.google.script.run) {
+            window.google.script.run
+              .withSuccessHandler(function(res) {
+                if (res && res.ok && res.dataUri) {
+                  audioEl.src = res.dataUri;
+                  if (AppState.isMusicPlaying) {
+                    audioEl.play().catch(function() { switchToSynthFallback(); });
+                  }
+                } else {
+                  switchToSynthFallback();
+                }
+              })
+              .withFailureHandler(function() {
+                switchToSynthFallback();
+              })
+              .getDriveMediaBase64(musicCfg.fileId);
+          } else {
+            switchToSynthFallback();
+          }
+        };
+      } else {
+        AppState.musicMode = 'synth';
+      }
+    }
+
+    function switchToSynthFallback() {
+      AppState.musicMode = 'synth';
+      if (AppState.isMusicPlaying) {
+        SynthPiano.startLoop();
+      }
+    }
+
+    function startMusicAfterInteraction() {
+      var audioEl = document.getElementById('bg-audio-player');
+      var btn = document.getElementById('btn-toggle-music');
+      AppState.isMusicPlaying = true;
+      if (btn) btn.classList.add('is-playing');
+
+      if (AppState.musicMode === 'mp3' && audioEl && audioEl.src) {
+        audioEl.volume = AppState.volume;
+        audioEl.play().catch(function() {
+          switchToSynthFallback();
+        });
+      } else {
+        SynthPiano.startLoop();
+      }
+    }
+
+    function toggleMusicPlayback() {
+      var audioEl = document.getElementById('bg-audio-player');
+      var btn = document.getElementById('btn-toggle-music');
+      if (AppState.isMusicPlaying) {
+        AppState.isMusicPlaying = false;
+        if (btn) btn.classList.remove('is-playing');
+        if (audioEl) audioEl.pause();
+        SynthPiano.stopLoop();
+      } else {
+        startMusicAfterInteraction();
+      }
+    }
+
+    /* --------------------------------------------------------------------------
+     * 3. TRÌNH VẼ HẠT SÁNG & TRÁI TIM BAY (1 VÒNG LẶP DUY NHẤT, TỐI ƯU PIN)
+     * -------------------------------------------------------------------------- */
+    function initAmbientCanvas() {
+      var canvas = document.getElementById('ambient-canvas');
+      if (!canvas || AppState.prefersReducedMotion) return;
+      var ctx = canvas.getContext('2d');
+
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+
+      AppState.particles = [];
+      var count = window.innerWidth < 500 ? 24 : 38;
+      for (var i = 0; i < count; i++) {
+        AppState.particles.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          r: Math.random() * 2.2 + 0.8,
+          vy: -(Math.random() * 0.35 + 0.12),
+          vx: (Math.random() - 0.5) * 0.22,
+          alpha: Math.random() * 0.55 + 0.15,
+          isHeart: i % 6 === 0
+        });
+      }
+
+      if (AppState.rafId) {
+        window.cancelAnimationFrame(AppState.rafId);
+      }
+
+      function renderFrame() {
+        if (!document.hidden) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          for (var j = 0; j < AppState.particles.length; j++) {
+            var p = AppState.particles[j];
+            p.x += p.vx;
+            p.y += p.vy;
+            if (p.y < -15) {
+              p.y = canvas.height + 10;
+              p.x = Math.random() * canvas.width;
+            }
+            ctx.save();
+            ctx.globalAlpha = p.alpha;
+            if (p.isHeart) {
+              ctx.font = '12px sans-serif';
+              ctx.fillStyle = '#f6bbd0';
+              ctx.fillText('♥', p.x, p.y);
+            } else {
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+              ctx.fillStyle = '#fff9f5';
+              ctx.fill();
+            }
+            ctx.restore();
+          }
+        }
+        AppState.rafId = window.requestAnimationFrame(renderFrame);
+      }
+      AppState.rafId = window.requestAnimationFrame(renderFrame);
+    }
+
+    /* --------------------------------------------------------------------------
+     * 4. TẢI TRƯỚC HÌNH ẢNH & FALLBACK THÔNG MINH (GOOGLE DRIVE -> PROXY -> SVG)
+     * -------------------------------------------------------------------------- */
+    function buildRomanticSvgPlaceholder(index, label) {
+      var palettes = [
+        ['#2a112b', '#6b1d2f', '#f6bbd0'],
+        ['#1b1029', '#4a1c40', '#f3c6d3'],
+        ['#24132c', '#7a2841', '#f9d5e0'],
+        ['#140a22', '#522146', '#f6bbd0']
+      ];
+      var pal = palettes[index % palettes.length];
+      var safeLabel = String(label || ('Kỷ niệm #' + (index + 1))).replace(/[<>&"']/g, '');
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1080" width="720" height="1080">' +
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+        '<stop offset="0%" stop-color="' + pal[0] + '"/>' +
+        '<stop offset="55%" stop-color="' + pal[1] + '"/>' +
+        '<stop offset="100%" stop-color="' + pal[2] + '"/>' +
+        '</linearGradient></defs>' +
+        '<rect width="720" height="1080" fill="url(#g)"/>' +
+        '<circle cx="360" cy="430" r="150" fill="rgba(255,249,245,0.08)"/>' +
+        '<text x="360" y="455" text-anchor="middle" font-size="92" fill="#fff9f5">❤️</text>' +
+        '<text x="360" y="640" text-anchor="middle" font-family="Georgia,serif" font-size="34" fill="#fff9f5">' + safeLabel + '</text>' +
+        '</svg>';
+      return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    }
+
+    function preloadAndResolveImage(imgItem, index, callback) {
+      var cacheKey = imgItem.fileId || imgItem.url || ('idx_' + index);
+      if (AppState.imageCache[cacheKey]) {
+        callback(AppState.imageCache[cacheKey]);
+        return;
+      }
+
+      var primaryUrl = imgItem.url || '';
+      if (!primaryUrl && !imgItem.fileId) {
+        var placeholder = buildRomanticSvgPlaceholder(index, imgItem.dateLabel);
+        AppState.imageCache[cacheKey] = placeholder;
+        callback(placeholder);
+        return;
+      }
+
+      var testImg = new Image();
+      testImg.onload = function() {
+        AppState.imageCache[cacheKey] = primaryUrl;
+        callback(primaryUrl);
+      };
+      testImg.onerror = function() {
+        // Thử backupUrl (lh3.googleusercontent.com)
+        if (imgItem.backupUrl) {
+          var backupImg = new Image();
+          backupImg.onload = function() {
+            AppState.imageCache[cacheKey] = imgItem.backupUrl;
+            callback(imgItem.backupUrl);
+          };
+          backupImg.onerror = function() {
+            fetchViaAppsScriptProxy(imgItem, index, cacheKey, callback);
+          };
+          backupImg.src = imgItem.backupUrl;
+        } else {
+          fetchViaAppsScriptProxy(imgItem, index, cacheKey, callback);
+        }
+      };
+      testImg.src = primaryUrl;
+    }
+
+    function fetchViaAppsScriptProxy(imgItem, index, cacheKey, callback) {
+      if (imgItem.fileId && window.google && window.google.script && window.google.script.run) {
+        window.google.script.run
+          .withSuccessHandler(function(res) {
+            if (res && res.ok && res.dataUri) {
+              AppState.imageCache[cacheKey] = res.dataUri;
+              callback(res.dataUri);
+            } else {
+              var svgFallback = buildRomanticSvgPlaceholder(index, imgItem.dateLabel);
+              AppState.imageCache[cacheKey] = svgFallback;
+              callback(svgFallback);
+            }
+          })
+          .withFailureHandler(function() {
+            var svgFallback = buildRomanticSvgPlaceholder(index, imgItem.dateLabel);
+            AppState.imageCache[cacheKey] = svgFallback;
+            callback(svgFallback);
+          })
+          .getDriveMediaBase64(imgItem.fileId);
+      } else {
+        var svgFallback = buildRomanticSvgPlaceholder(index, imgItem.dateLabel);
+        AppState.imageCache[cacheKey] = svgFallback;
+        callback(svgFallback);
+      }
+    }
+
+    /* --------------------------------------------------------------------------
+     * 5. QUẢN LÝ CHUYỂN CẢNH (SCENE TRANSITION SYSTEM)
+     * -------------------------------------------------------------------------- */
+    function clearAllSceneTimers() {
+      if (AppState.photoTimerId) {
+        window.clearInterval(AppState.photoTimerId);
+        AppState.photoTimerId = null;
+      }
+      while (AppState.confessionTimers.length > 0) {
+        window.clearTimeout(AppState.confessionTimers.pop());
+      }
+    }
+
+    function updateProgressHud(sceneNumber) {
+      var pill = document.getElementById('scene-label-pill');
+      if (pill) {
+        pill.textContent = SCENE_TITLES[sceneNumber] || ('Cảnh ' + sceneNumber + ' / 5');
+      }
+      for (var i = 1; i <= 5; i++) {
+        var bar = document.getElementById('prog-' + i);
+        if (bar) {
+          bar.style.width = (i <= sceneNumber) ? '100%' : '0%';
+        }
+      }
+    }
+
+    function goToScene(sceneNumber) {
+      var target = Math.max(1, Math.min(5, Number(sceneNumber) || 1));
+      clearAllSceneTimers();
+      AppState.currentScene = target;
+
+      for (var i = 1; i <= 5; i++) {
+        var layer = document.getElementById('scene-' + i);
+        if (layer) {
+          if (i === target) {
+            layer.classList.add('active');
+          } else {
+            layer.classList.remove('active');
+          }
+        }
+      }
+
+      updateProgressHud(target);
+
+      if (target === 2) {
+        showPhotoAtIndex(AppState.currentPhotoIndex);
+        startPhotoAutoAdvance();
+      } else if (target === 3) {
+        runConfessionReveal();
+      } else if (target === 4) {
+        resetEnvelopeState();
+      }
+    }
+
+    /* --------------------------------------------------------------------------
+     * 6. LOGIC CHI TIẾT CHO TỪNG CẢNH (CẢNH 2, 3, 4, 5)
+     * -------------------------------------------------------------------------- */
+    function showPhotoAtIndex(idx) {
+      var images = (AppState.config && Array.isArray(AppState.config.images) && AppState.config.images.length > 0)
+        ? AppState.config.images
+        : [{ dateLabel: 'Kỷ niệm #1', caption: 'Khoảnh khắc bên em.', url: '' }];
+
+      var safeIndex = ((idx % images.length) + images.length) % images.length;
+      AppState.currentPhotoIndex = safeIndex;
+
+      var item = images[safeIndex];
+      var imgEl = document.getElementById('active-memory-img');
+      var dateEl = document.getElementById('active-memory-date');
+      var capEl = document.getElementById('active-memory-caption');
+      var counterEl = document.getElementById('photo-counter-badge');
+
+      if (dateEl) dateEl.textContent = item.dateLabel || ('Kỷ niệm #' + (safeIndex + 1));
+      if (capEl) capEl.textContent = item.caption || '';
+      if (counterEl) counterEl.textContent = (safeIndex + 1) + ' / ' + images.length;
+
+      if (imgEl) {
+        imgEl.classList.remove('ken-burns-active');
+        imgEl.style.opacity = '0.25';
+        preloadAndResolveImage(item, safeIndex, function(resolvedSrc) {
+          imgEl.src = resolvedSrc;
+          imgEl.style.opacity = '1';
+          window.requestAnimationFrame(function() {
+            imgEl.classList.add('ken-burns-active');
+          });
+        });
+
+        // Tải trước ảnh kế tiếp để không bị giật lag khi chuyển ảnh
+        var nextIndex = (safeIndex + 1) % images.length;
+        preloadAndResolveImage(images[nextIndex], nextIndex, function() {});
+      }
+    }
+
+    function startPhotoAutoAdvance() {
+      if (AppState.photoTimerId) {
+        window.clearInterval(AppState.photoTimerId);
+      }
+      var timing = (AppState.config && AppState.config.timing) || {};
+      if (timing.autoAdvancePhotos === false) return;
+
+      var duration = Math.max(3800, Number(timing.photoDurationMs) || 5500);
+      AppState.photoTimerId = window.setInterval(function() {
+        if (document.hidden || AppState.currentScene !== 2) return;
+        var images = (AppState.config && AppState.config.images) || [];
+        if (AppState.currentPhotoIndex < images.length - 1) {
+          showPhotoAtIndex(AppState.currentPhotoIndex + 1);
+        } else {
+          window.clearInterval(AppState.photoTimerId);
+        }
+      }, duration);
+    }
+
+    function runConfessionReveal() {
+      var box = document.getElementById('confession-lines-box');
+      if (!box) return;
+      box.innerHTML = '';
+
+      var lines = (AppState.config && Array.isArray(AppState.config.confessionLines))
+        ? AppState.config.confessionLines
+        : [
+            'Có những lúc anh đã vô tâm…',
+            'Có những lời anh nói khiến em buồn…',
+            'Anh biết một lời xin lỗi không thể xóa hết mọi chuyện.',
+            'Nhưng anh thật lòng muốn lắng nghe và sửa đổi.'
+          ];
+
+      var delayStep = (AppState.config && AppState.config.timing && AppState.config.timing.confessionLineDelayMs) || 2400;
+
+      lines.forEach(function(lineText, idx) {
+        var p = document.createElement('p');
+        p.className = 'confession-line-item';
+        p.textContent = lineText;
+        box.appendChild(p);
+
+        var tId = window.setTimeout(function() {
+          p.classList.add('revealed');
+        }, idx * delayStep + 250);
+        AppState.confessionTimers.push(tId);
+      });
+    }
+
+    function resetEnvelopeState() {
+      var closedBox = document.getElementById('envelope-closed-box');
+      var openedBox = document.getElementById('letter-opened-box');
+      if (closedBox) closedBox.style.display = 'block';
+      if (openedBox) openedBox.style.display = 'none';
+    }
+
+    function openEnvelopeLetter() {
+      var closedBox = document.getElementById('envelope-closed-box');
+      var openedBox = document.getElementById('letter-opened-box');
+      if (closedBox) closedBox.style.display = 'none';
+      if (openedBox) openedBox.style.display = 'block';
+    }
+
+    /* --------------------------------------------------------------------------
+     * 7. ÁP DỤNG CẤU HÌNH VÀO GIAO DIỆN
+     * -------------------------------------------------------------------------- */
+    function applyStoryConfiguration(cfg) {
+      AppState.config = cfg || {};
+
+      // Áp dụng màu sắc chủ đạo
+      if (cfg.theme) {
+        var root = document.documentElement;
+        if (cfg.theme.primaryPink) root.style.setProperty('--primary-pink', cfg.theme.primaryPink);
+        if (cfg.theme.creamWhite) root.style.setProperty('--cream-white', cfg.theme.creamWhite);
+        if (cfg.theme.wineRed) root.style.setProperty('--wine-red', cfg.theme.wineRed);
+        if (cfg.theme.sunsetPurple) root.style.setProperty('--sunset-purple', cfg.theme.sunsetPurple);
+      }
+
+      // Cảnh 1
+      var badgeEl = document.getElementById('ui-recipient-badge');
+      var openTextEl = document.getElementById('ui-opening-text');
+      var openSubEl = document.getElementById('ui-opening-subtitle');
+      var openBtnEl = document.getElementById('ui-opening-btn-text');
+      var envTitleEl = document.getElementById('envelope-recipient-title');
+
+      if (badgeEl) badgeEl.textContent = 'Gửi ' + (cfg.recipientName || 'Em yêu') + ' ❤️';
+      if (envTitleEl) envTitleEl.textContent = 'Gửi ' + (cfg.recipientName || 'Em yêu');
+      if (openTextEl) openTextEl.textContent = cfg.openingText || 'Em à, anh có điều muốn nói…';
+      if (openSubEl) openSubEl.textContent = cfg.openingSubtitle || 'Hãy bật âm thanh và dành cho anh vài phút nhỏ nhé.';
+      if (openBtnEl) openBtnEl.textContent = cfg.openingButtonText || 'Chạm vào đây nhé ❤️';
+
+      // Chế độ căn chỉnh ảnh (cover / contain)
+      var memImg = document.getElementById('active-memory-img');
+      if (memImg) {
+        if (cfg.timing && cfg.timing.imageFitMode === 'contain') {
+          memImg.classList.add('fit-contain');
+        } else {
+          memImg.classList.remove('fit-contain');
+        }
+      }
+
+      // Cảnh 4: Lá thư
+      var lTitle = document.getElementById('ui-letter-title');
+      var lBody = document.getElementById('ui-letter-body');
+      var lSign = document.getElementById('ui-letter-signoff');
+      if (lTitle) lTitle.textContent = cfg.letterTitle || 'Gửi em, người mà anh luôn trân trọng.';
+      if (lSign) lSign.textContent = cfg.letterSignOff || 'Anh xin lỗi em. ❤️';
+      if (lBody) {
+        lBody.innerHTML = '';
+        var rawParagraphs = String(cfg.letterBody || '').split(/\n+/);
+        rawParagraphs.forEach(function(para) {
+          if (para.trim()) {
+            var p = document.createElement('p');
+            p.textContent = para.trim();
+            lBody.appendChild(p);
+          }
+        });
+      }
+
+      // Cảnh 5: Lời nhắn cuối
+      var fLine1 = document.getElementById('ui-final-line-1');
+      var fLine2 = document.getElementById('ui-final-line-2');
+      var fBg = document.getElementById('final-scene-bg');
+      if (fLine1) fLine1.textContent = cfg.finalMessageLine1 || 'Anh không mong em phải tha thứ ngay lúc này.';
+      if (fLine2) fLine2.textContent = cfg.finalMessageLine2 || 'Anh chỉ mong em biết rằng lời xin lỗi này là thật lòng.';
+
+      if (fBg && cfg.images && cfg.images.length > 0) {
+        var lastImg = cfg.images[cfg.images.length - 1];
+        preloadAndResolveImage(lastImg, cfg.images.length - 1, function(resolvedUrl) {
+          fBg.style.backgroundImage = 'url("' + resolvedUrl + '")';
+        });
+      }
+
+      // Khởi tạo nhạc nền và tải trước bức ảnh đầu tiên
+      initAudioSystem(cfg.music || {});
+      if (cfg.images && cfg.images.length > 0) {
+        preloadAndResolveImage(cfg.images[0], 0, function() {});
+      }
+    }
+
+    /* --------------------------------------------------------------------------
+     * 8. GẮN SỰ KIỆN TƯƠNG TÁC (EVENT LISTENERS)
+     * -------------------------------------------------------------------------- */
+    function bindEvents() {
+      // Nút mở màn ở Cảnh 1
+      var btnStart = document.getElementById('btn-start-story');
+      if (btnStart) {
+        btnStart.addEventListener('click', function() {
+          startMusicAfterInteraction();
+          goToScene(2);
+        });
+      }
+
+      // Thanh tiến trình trên cùng
+      var segments = document.querySelectorAll('.progress-segment');
+      segments.forEach(function(seg) {
+        seg.addEventListener('click', function() {
+          var s = Number(seg.getAttribute('data-scene'));
+          if (s) goToScene(s);
+        });
+      });
+
+      // Điều hướng ảnh ở Cảnh 2
+      var nextPhotoHandler = function() {
+        var imgs = (AppState.config && AppState.config.images) || [];
+        if (AppState.currentPhotoIndex < imgs.length - 1) {
+          showPhotoAtIndex(AppState.currentPhotoIndex + 1);
+          startPhotoAutoAdvance();
+        } else {
+          goToScene(3);
+        }
+      };
+
+      var prevPhotoHandler = function() {
+        if (AppState.currentPhotoIndex > 0) {
+          showPhotoAtIndex(AppState.currentPhotoIndex - 1);
+          startPhotoAutoAdvance();
+        } else {
+          goToScene(1);
+        }
+      };
+
+      var btnNextPhoto = document.getElementById('btn-next-photo');
+      var btnPrevPhoto = document.getElementById('btn-prev-photo');
+      var tapNext = document.getElementById('tap-next-photo');
+      var tapPrev = document.getElementById('tap-prev-photo');
+
+      if (btnNextPhoto) btnNextPhoto.addEventListener('click', nextPhotoHandler);
+      if (btnPrevPhoto) btnPrevPhoto.addEventListener('click', prevPhotoHandler);
+      if (tapNext) tapNext.addEventListener('click', nextPhotoHandler);
+      if (tapPrev) tapPrev.addEventListener('click', prevPhotoHandler);
+
+      // Điều hướng Cảnh 3
+      var btnBackMem = document.getElementById('btn-back-to-memories');
+      var btnToLetter = document.getElementById('btn-to-letter');
+      if (btnBackMem) btnBackMem.addEventListener('click', function() { goToScene(2); });
+      if (btnToLetter) btnToLetter.addEventListener('click', function() { goToScene(4); });
+
+      // Điều hướng Cảnh 4 (Mở phong bì thư)
+      var envBox = document.getElementById('envelope-closed-box');
+      var btnOpenEnv = document.getElementById('btn-open-envelope');
+      var btnToFinal = document.getElementById('btn-to-final-scene');
+      if (envBox) envBox.addEventListener('click', openEnvelopeLetter);
+      if (btnOpenEnv) {
+        btnOpenEnv.addEventListener('click', function(e) {
+          e.stopPropagation();
+          openEnvelopeLetter();
+        });
+      }
+      if (btnToFinal) btnToFinal.addEventListener('click', function() { goToScene(5); });
+
+      // Điều hướng Cảnh 5
+      var btnReread = document.getElementById('btn-reread-letter');
+      var btnRewatch = document.getElementById('btn-rewatch-memories');
+      if (btnReread) {
+        btnReread.addEventListener('click', function() {
+          goToScene(4);
+          openEnvelopeLetter();
+        });
+      }
+      if (btnRewatch) {
+        btnRewatch.addEventListener('click', function() {
+          AppState.currentPhotoIndex = 0;
+          goToScene(2);
+        });
+      }
+
+      // Điều khiển nhạc nền
+      var btnMusic = document.getElementById('btn-toggle-music');
+      var volSlider = document.getElementById('music-volume-slider');
+      if (btnMusic) btnMusic.addEventListener('click', toggleMusicPlayback);
+      if (volSlider) {
+        volSlider.addEventListener('input', function(e) {
+          AppState.volume = Number(e.target.value);
+          var audioEl = document.getElementById('bg-audio-player');
+          if (audioEl) audioEl.volume = AppState.volume;
+        });
+      }
+
+      // Modal gửi lời nhắn ở Cảnh 5
+      var replyModal = document.getElementById('reply-modal');
+      var btnOpenReply = document.getElementById('btn-open-reply-modal');
+      var btnCloseReply = document.getElementById('btn-close-reply-modal');
+      var btnSendReply = document.getElementById('btn-send-reply');
+      var moodChips = document.querySelectorAll('.mood-chip');
+
+      moodChips.forEach(function(chip) {
+        chip.addEventListener('click', function() {
+          AppState.selectedMood = chip.getAttribute('data-mood') || '';
+          var inputEl = document.getElementById('reply-message-input');
+          if (inputEl && !inputEl.value.trim()) {
+            inputEl.value = AppState.selectedMood;
+          }
+        });
+      });
+
+      if (btnOpenReply && replyModal) {
+        btnOpenReply.addEventListener('click', function() {
+          replyModal.classList.add('open');
+        });
+      }
+      if (btnCloseReply && replyModal) {
+        btnCloseReply.addEventListener('click', function() {
+          replyModal.classList.remove('open');
+        });
+      }
+      if (btnSendReply) {
+        btnSendReply.addEventListener('click', function() {
+          var inputEl = document.getElementById('reply-message-input');
+          var statusEl = document.getElementById('reply-status-msg');
+          var msg = inputEl ? inputEl.value.trim() : '';
+          if (!msg) {
+            if (statusEl) statusEl.textContent = 'Em hãy viết vài chữ hoặc chọn một trạng thái phía trên nhé 🤍';
+            return;
+          }
+          if (statusEl) statusEl.textContent = 'Đang gửi lời nhắn cho anh...';
+
+          if (window.google && window.google.script && window.google.script.run) {
+            window.google.script.run
+              .withSuccessHandler(function(res) {
+                if (statusEl) {
+                  statusEl.textContent = (res && res.message) ? res.message : 'Đã gửi lời nhắn thành công ❤️';
+                }
+                if (inputEl) inputEl.value = '';
+              })
+              .withFailureHandler(function(err) {
+                if (statusEl) statusEl.textContent = 'Không thể gửi lúc này: ' + (err.message || err);
+              })
+              .saveLoverReply({ mood: AppState.selectedMood, message: msg });
+          } else {
+            if (statusEl) statusEl.textContent = 'Đã ghi nhận lời nhắn của em ❤️';
+          }
+        });
+      }
+    }
+
+    /* --------------------------------------------------------------------------
+     * 9. KHỞI ĐỘNG ỨNG DỤNG
+     * -------------------------------------------------------------------------- */
+    window.addEventListener('DOMContentLoaded', function() {
+      initAmbientCanvas();
+      bindEvents();
+
+      if (window.google && window.google.script && window.google.script.run) {
+        window.google.script.run
+          .withSuccessHandler(function(cfg) {
+            applyStoryConfiguration(cfg);
+          })
+          .withFailureHandler(function() {
+            applyStoryConfiguration({});
+          })
+          .getPublicStoryConfig();
+      } else {
+        applyStoryConfiguration({});
+      }
+    });
+  })();
+</script>
